@@ -31,7 +31,6 @@ import signal
 from sklearn.metrics import euclidean_distances
 import dash_daq as daq
 import xlwings as xw
-import pythoncom
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
