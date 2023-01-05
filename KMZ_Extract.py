@@ -11,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
 from RPLTool import app, server, process_coordinate_string, quit1
 import dash_bootstrap_components as dbc
-import shutil
 
 # Get current operating directory
 dir_path = os.getcwd()
@@ -26,6 +25,7 @@ if not os.path.exists(UPLOAD_DIRECTORY):
 def download(path):
     """Serve a file from the upload directory."""
     return send_from_directory(UPLOAD_DIRECTORY, path, as_attachment=True)
+
 
 def create_page_KMZ_extract():
     layout = html.Div(
@@ -70,17 +70,23 @@ def create_page_KMZ_extract():
                     'display': 'inline-block',
                 },
                 multiple=True,
-                #accept='.kmz'
             ),
             html.Div([
-            # Loading symbol for KMZ extraction wait
-            dcc.Loading(
-                id="loading-11",
-                type="default",
-                children=[html.Div(id="loading-output-KMZ")],
-                style={
-                    'display': 'inline-block'
-                })
+                # Loading symbol for KMZ extraction wait
+                dcc.Loading(
+                    id="loading-11",
+                    type="default",
+                    children=[html.Div(id="loading-output-KMZ")],
+                    style={
+                        'display': 'inline-block'
+                    }),
+                dcc.Loading(
+                    id="loading-11",
+                    type="default",
+                    children=[html.Div(id="loading-output-download-all")],
+                    style={
+                        'display': 'inline-block'
+                    })
             ],
                 style={
                     'margin-top': '20px'
@@ -89,15 +95,18 @@ def create_page_KMZ_extract():
 
             html.Div(
                 [
-                    dbc.Input(id="input", placeholder="Search...", type="text", style={"margin":"auto", "width":"15%", "text-align":"center"}),
+                    # Search box for file list
+                    dbc.Input(id="input", placeholder="Search File List", type="text",
+                              style={"margin": "auto", "width": "15%", "text-align": "center"}),
                 ], style={
-                    "margin-top":"50px"
+                    "margin-top": "50px"
                 }
             ),
             html.H6("File List"),
             html.Div(
+                # Download All Button
                 ['Click a file to download or   ',
-                 html.Button('Download All', id='download_all_btn', n_clicks=0),
+                 html.Button('Download All (.zip)', id='download_all_btn', n_clicks=0),
                  dcc.Download(id="download_all")],
 
                 className='text',
@@ -108,27 +117,39 @@ def create_page_KMZ_extract():
 
             html.Ul(id="file-list"),
         ],
-        style={"text-align":"center"},
+        style={"text-align": "center"},
     )
     return layout
 
 
 @app.callback(
     Output("download_all", "data"),
+    Output("loading-output-download-all", "children"),
     Input('download_all_btn', 'n_clicks'),
     prevent_initial_call=True,
 )
 def download_all(n_clicks):
+    """
+    This function compresses all the files into a zip and creates a download link for the user.
+    Parameters: n_clicks: Number of times the download button has been pressed.
+    Return: KMZ_Extract.zip containing all the files.
+    """
     global file_list
+
+    # Create zip file containing all individual kml files
     with ZipFile("KMZ_Extract.zip", 'w') as zipObj:
+        # Iterate through each file in the file_list
         for file in file_list:
+            # Write each KML file into the .zip folder
             filePath = os.path.join(UPLOAD_DIRECTORY, file)
             zipObj.write(filePath, basename(filePath))
-    #shutil.make_archive("KMZ_Extract", 'zip', UPLOAD_DIRECTORY)
-    return dcc.send_file("KMZ_Extract.zip")
+    return dcc.send_file("KMZ_Extract.zip"), ("", "")
+
 
 def save_file(name, content):
-    """Decode and store a file uploaded with Plotly Dash."""
+    """
+    Decode and store a file uploaded with Plotly Dash.
+    """
     data = content.encode("utf8").split(b";base64,")[1]
     with open(os.path.join(UPLOAD_DIRECTORY, name), "wb") as fp:
         fp.write(base64.decodebytes(data))
@@ -148,6 +169,7 @@ def file_download_link(filename):
     """Create a Plotly Dash 'A' element that downloads a file from the app."""
     location = "/download/{}".format(urlquote(filename))
     return html.A(filename, href=location)
+
 
 def extract_KML(folder):
     """
@@ -174,6 +196,7 @@ def extract_KML(folder):
     # Save KML
     kml.save(kmlname)
 
+
 @app.callback(
     Output('loading-output-KMZ', 'children'),
     Output("file-list", "children"),
@@ -186,6 +209,7 @@ def update_output(uploaded_filenames, uploaded_file_contents, value):
 
     if uploaded_filenames is not None and uploaded_file_contents is not None:
         for name, data in zip(uploaded_filenames, uploaded_file_contents):
+            # Check file type is .kmz
             if ".kmz" in name:
                 # Save file
                 save_file(name, data)
@@ -215,7 +239,7 @@ def update_output(uploaded_filenames, uploaded_file_contents, value):
     else:
         if not value:
             file_list = files
-            return ("",""),[html.Li(file_download_link(filename)) for filename in files]
+            return ("", ""), [html.Li(file_download_link(filename)) for filename in files]
         else:
             # If search term entered, iterate through files list
             for filename in files:

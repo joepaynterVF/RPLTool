@@ -21,7 +21,6 @@ from sklearn.metrics import euclidean_distances
 import dash_daq as daq
 from pathlib import Path
 import xlwings as xw
-#import pythoncom
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
@@ -51,7 +50,7 @@ if os.path.exists('sorted.csv') and os.path.exists('unsorted.csv'):
 # Initialise Server
 server = flask.Flask(__name__)
 # Build Components
-app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Get current operating directory
 dir_path = os.getcwd()
@@ -146,7 +145,7 @@ def RPL_layout():
         # Upload Files Box
         html.Div([
             du.Upload(
-                text='Drag and Drop files here',
+                text='Drag and Drop .kmz or .kml files here',
                 text_completed='Completed: ',
                 pause_button=False,
                 cancel_button=True,
