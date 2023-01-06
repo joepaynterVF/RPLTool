@@ -32,6 +32,12 @@ unsorted_coordinates = []
 graph_name = ""
 # Set colours so that first plot is shown as unsorted, in orange.
 initialFig = px.scatter_geo(color_discrete_sequence=["#ef553c", "#636efa"])
+initialFig.update_geos(
+    resolution=50,
+    showframe=True,
+    showland=True, landcolor="Green",
+    showocean=True, oceancolor="LightBlue",
+    showcountries=True, countrycolor="Yellow")
 initialFig.update_layout(clickmode='event+select', title=graph_name, title_x=0.55, title_font_family='sans-serif')
 suggestedCoordinates = ''
 latSuggestion = ''
@@ -548,7 +554,12 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
         # Set size of marker
         fig.update_traces(marker=dict(size=4))
         # Center map view to the cable that has been plotted
-        fig.update_geos(fitbounds="locations")
+        fig.update_geos(fitbounds="locations",
+                        resolution=50,
+                        showframe=True,
+                        showland=True, landcolor="Green",
+                        showocean=True, oceancolor="LightBlue",
+                        showcountries=True, countrycolor="Yellow")
         # Apply fig to the global figure
         initialFig = fig
         return toggle, {
@@ -594,7 +605,12 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                 fig = px.scatter_geo(df_res, lat='Latitude', lon='Longitude', hover_name="Colour", color="Colour",
                                      color_discrete_sequence=["#636efa", "#ef553c"], labels={"Colour": "Key"})
                 fig.update_layout(title=graph_name, title_x=0.55, title_font_family='sans-serif')
-                fig.update_geos(fitbounds="locations")
+                fig.update_geos(fitbounds="locations",
+                                resolution=50,
+                                showframe=True,
+                                showland=True, landcolor="Green",
+                                showocean=True, oceancolor="LightBlue",
+                                showcountries=True, countrycolor="Yellow")
                 fig.update_traces(marker=dict(size=4))
                 initialFig = fig
                 # Get suggested next coordinates by sending lat and lon
@@ -658,7 +674,13 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                                      color_discrete_sequence=["#636efa", "#ef553c"], labels={"Colour": "Key"})
                 fig.update_layout(title=graph_name, title_x=0.55)
                 fig.update_traces(marker=dict(size=4))
-                fig.update_geos(fitbounds="locations")
+                fig.update_geos(fitbounds="locations",
+                                resolution=50,
+                                showframe=True,
+                                showland=True, landcolor="Green",
+                                showocean=True, oceancolor="LightBlue",
+                                showcountries=True, countrycolor="Yellow")
+
                 # Save sorted.csv into a dataframe without colour column
                 sortedCoordinates = (pd.read_csv(f'sorted.csv')).drop(['Colour'], axis=1)
                 # Create RPL with sorted coordinates
