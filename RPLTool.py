@@ -50,7 +50,7 @@ if os.path.exists('sorted.csv') and os.path.exists('unsorted.csv'):
 # Initialise Server
 server = flask.Flask(__name__)
 # Build Components
-app = Dash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Get current operating directory
 dir_path = os.getcwd()
