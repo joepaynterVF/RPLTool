@@ -28,7 +28,7 @@ import openpyxl
 import glob
 import webbrowser
 import signal
-from sklearn.metrics import euclidean_distances
+
 import dash_daq as daq
 import xlwings as xw
 import simplekml
@@ -198,40 +198,83 @@ def update_output(uploaded_filenames, uploaded_file_contents, n_clicks):
             return {'display': 'none'}, "RPL file already converted", ("", "")
         except IndexError:
             return {'display': 'none'}, "Please upload a RPL file", ("", "")
-
-        # Save only longitude and latitude columns
-        df_cols = df.iloc[:, [2, 3, 5, 6]]
-        # Drop and delete NaN rows
-        df2 = df_cols.dropna()
+        # Save only longitude, latitude, cable type and slack columns
+        df_cols = df.iloc[:, [2, 3, 5, 6, 23, 26]]
+        # Drop first two rows containing header
+        df_cols = df_cols.drop([0,1])
+        # Drop NaN values by cells
+        df2 = df_cols.apply(lambda x: pd.Series(x.dropna().values))
 
         # Remove file type extension
         if ".xlsx" in rpl_list[0]:
             RPL_name = rpl_list[0].replace(".xlsx", "")
         else:
             RPL_name = rpl_list[0].replace(".xls", "")
-
+        # Initialise variables
         coords = []
+        cable_type = []
+        slack = []
+        prev_cable_type = df2.iloc[:, 5].iloc[1]
         index = 0
+        i = 0
+
         # Loop through each row of dataframe
-        while index <= len(df.index):
-            try:
-                # Combine both longitude columns together.
-                lat = (df2.iloc[:, 0].iloc[index]) + ((df2.iloc[:, 1].iloc[index]) / 60)
-                # Combine both latitude columns together.
-                lon = (df2.iloc[:, 2].iloc[index]) + ((df2.iloc[:, 3].iloc[index]) / 60)
-                # Append coordinate to coords array
-                coords.append([lon, lat])
-            except IndexError:
-                pass
+        while index < df2.shape[0]:
+
+            # Combine both longitude columns together.
+            lat = (df2.iloc[:, 0].iloc[index]) + ((df2.iloc[:, 1].iloc[index]) / 60)
+            # Combine both latitude columns together.
+            lon = (df2.iloc[:, 2].iloc[index]) + ((df2.iloc[:, 3].iloc[index]) / 60)
+            # Check if current cable type equals previous cable type
+            # Different cable types indicate different sections
+            if df2.iloc[:, 5].iloc[index] == prev_cable_type:
+                try:
+                    # Attempt to append coordinates into array using an index, indicating the same section.
+                    slack[i].append(df2.iloc[:, 4].iloc[index])
+                    cable_type[i].append(df2.iloc[:, 5].iloc[index])
+                    coords[i].append([lon, lat])
+                    prev_cable_type = df2.iloc[:, 5].iloc[index]
+
+                except IndexError:
+                    # If the section, index, has not been created yet, just add the coordinates, this creates the index, section.
+                    slack.append([df2.iloc[:, 4].iloc[index]])
+                    cable_type.append([df2.iloc[:, 5].iloc[index]])
+                    coords.append([[lon, lat]])
+
+            else:
+                slack.append([df2.iloc[:, 4].iloc[index]])
+                cable_type.append([df2.iloc[:, 5].iloc[index]])
+                coords.append([[lon, lat]])
+                prev_cable_type = df2.iloc[:, 5].iloc[index]
+                i += 1
             index += 1
 
         # Create KML object
         kml = simplekml.Kml()
-        # Add one linestring as no section data in RPL
-        kml.newlinestring(name=RPL_name, coords=coords)
-        # Remove slashes from folder name to avoid error when creating a path and saving file
+
+        n = 0
+        while n <= len(coords):
+
+            try:
+                # For each set of coordinates in each section, different cable type, add a new linestring to the kml
+                linestring = kml.newlinestring(name=RPL_name,coords=coords[n])
+                # For each set of simpledata attributes in each section, add new simpledata field with corrospoding value
+                linestring.extendeddata.schemadata.newsimpledata('cable_type', cable_type[n][0])
+                linestring.extendeddata.schemadata.newsimpledata('slack_percent', slack[n][0])
+
+            except IndexError:
+                break
+            # Increment i to cycle through coords and all the arrays
+            n += 1
+
+        # Remove chars from folder name to avoid error when creating a path and saving file
         RPL_name = RPL_name.replace('/', '')
         RPL_name = RPL_name.replace('\\', '')
+        RPL_name = RPL_name.replace('&', '')
+        RPL_name = RPL_name.replace('<', '')
+        RPL_name = RPL_name.replace('>', '')
+        RPL_name = RPL_name.replace('"', '')
+        RPL_name = RPL_name.replace("'", '')
 
         # Set KML name and save directory
         kmlname = os.path.join(UPLOAD_DIRECTORY, (RPL_name + ".kml"))

@@ -1,8 +1,4 @@
 import dash_bootstrap_components as dbc
-# Run this app with `python app.py` and
-# visit http://127.0.0.1:8050/ in your web browser.
-from pathlib import Path
-from jupyter_dash import JupyterDash
 import dash_uploader as du
 import flask
 from bs4 import BeautifulSoup
@@ -13,23 +9,31 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 import os
+from jupyter_dash import JupyterDash
 import openpyxl
 import glob
-import webbrowser
 import signal
 from sklearn.metrics import euclidean_distances
 import dash_daq as daq
 from pathlib import Path
-import xlwings as xw
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
-import time
-
-
+from copy import copy, deepcopy
+import itertools
+check = False
 sorted_coordinates = []
 unsorted_coordinates = []
 graph_name = ""
+segment_name = ""
+unsorted_coordinates_cable_types = []
+unsorted_coordinates_no_cable_types = []
+cable_type_arr = []
+prev_section = []
+number = 0
+header_check = False
+header_check_cable_type = False
+prev_del = False
 # Set colours so that first plot is shown as unsorted, in orange.
 initialFig = px.scatter_geo(color_discrete_sequence=["#ef553c", "#636efa"])
 initialFig.update_geos(
@@ -37,7 +41,8 @@ initialFig.update_geos(
     showframe=True,
     showland=True, landcolor="Green",
     showocean=True, oceancolor="LightBlue",
-    showcountries=True, countrycolor="Yellow")
+    showcountries=True, countrycolor="Yellow",
+    showlakes=True, lakecolor="LightBlue")
 initialFig.update_layout(clickmode='event+select', title=graph_name, title_x=0.55, title_font_family='sans-serif')
 suggestedCoordinates = ''
 latSuggestion = ''
@@ -49,14 +54,17 @@ styles = {
         'border': 'thin lightgrey solid',
         'overflowX': 'scroll'}
 }
-if os.path.exists('sorted.csv') and os.path.exists('unsorted.csv'):
+# Delete sorted and unsorted csv's if they exist.
+if os.path.exists('sorted.csv'):
     os.remove("sorted.csv")
+if os.path.exists('unsorted.csv'):
     os.remove("unsorted.csv")
 
 # Initialise Server
 server = flask.Flask(__name__)
 # Build Components
-app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True,
+           external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Get current operating directory
 dir_path = os.getcwd()
@@ -87,6 +95,8 @@ def get_kml_file():
 
 # Configure Dash upload component
 du.configure_upload(app, UPLOAD_FOLDER, use_upload_id=False)
+
+
 def RPL_layout():
     # Dash Layout Customisation
     layout = html.Div(children=[
@@ -124,7 +134,8 @@ def RPL_layout():
 
             # File List Dropdown
             html.Div([
-                dcc.Dropdown(get_kml_file(), id='dropdown', placeholder='Select KML File', maxHeight=200, optionHeight=50)],
+                dcc.Dropdown(get_kml_file(), id='dropdown', placeholder='Select KML File', maxHeight=200,
+                             optionHeight=50)],
                 style={
                     'width': '15em',
                     'margin': '10px',
@@ -349,15 +360,20 @@ def RPL_layout():
     ], style={'text-align': 'center'})
     return layout
 
+
 @app.callback(
     Output("Output_div", "children"),
     Input("Quit_btn", "n_clicks")
 )
 def quit1(n_clicks):
+    """
+    Function to kill the program if shutdown button pressed.
+    """
     if n_clicks > 0:
         # Kill program if Quit button pressed
         os.kill(os.getpid(), signal.SIGTERM)
     return
+
 
 # TODO Add description
 @app.callback(
@@ -365,8 +381,11 @@ def quit1(n_clicks):
     Input("btn_RPL", "n_clicks"),
     prevent_initial_call=True,
 )
-
 def download_RPL(n_clicks):
+    """
+    Function to return the RPL to the user as a downloaded file.
+    Return: Newly created RPL file.
+    """
     global sorted_coordinates
     # Clear coordinates array to avoid added RPL to end of Old RPL if server not restarted
     sorted_coordinates.clear()
@@ -376,7 +395,6 @@ def download_RPL(n_clicks):
     )
 
 
-# Update Dropdown
 def update_options(existing_options):
     """
     This function updates the dropdown box.
@@ -404,29 +422,187 @@ def extract_KML(folder):
     Returns: Nothing. Saves to upload folder
     Params: folder:Contains the entire contents of a single folder from the kmz
     """
+    global cable_type_arr
     # Create KML object
     kml = simplekml.Kml()
     # Find name of folder
     folder_name = folder.find('name')
     # Find all coordinates in that folder
     coordinates = folder.find_all('coordinates')
+    placemark_coordinates = []
+    system_name = []
+    ship_operation = []
+    operation_date = []
+    cable_type = []
+    slack_percent = []
+    segment_name = []
+    system_type = []
+    installation_year = []
+    out_of_service_year = []
+    allsimpledataobjs = {}
 
-    # For each set of coordinates in that folder, add a new linestring to the kml
-    for coor in coordinates:
-        kml.newlinestring(name=folder_name, coords=process_coordinate_string(coor.string, True))
-    # Remove slashes from folder name to avoid error when creating a path and saving file
+    if folder.find_all('Placemark'):
+        # Find all placemarks in folder
+        placemarks = folder.find_all('Placemark')
+        # For each placemark object in each placemark
+        for placemarkobj in placemarks:
+            if placemarkobj.find_all('SimpleData'):
+                # Find all simpledata tags
+                simpledata = placemarkobj.find_all("SimpleData")
+
+                # Cycle through each simpledata tag, saving to allsimpledataobjs dict
+                for simpledataobj in simpledata:
+                    # Save each simpledata attribute name and the associated value
+                    allsimpledataobjs[simpledataobj.get('name')] = simpledataobj.text
+
+                # Cycle through each simpledata attribute adding the value to associate attribute array
+                if "system_name" in allsimpledataobjs:
+                    systemname = allsimpledataobjs["system_name"]
+                    # Clean value so XML does not throw an error.
+                    systemname = systemname.replace('/', '')
+                    systemname = systemname.replace('\\', '')
+                    systemname = systemname.replace('&', '')
+                    systemname = systemname.replace('<', '')
+                    systemname = systemname.replace('>', '')
+                    systemname = systemname.replace('"', '')
+                    systemname = systemname.replace("'", '')
+                    system_name.append(systemname)
+                else:
+                    # If attribute not in simpledata array within KML, append empty field
+                    system_name.append("")
+                if "ship_operation" in allsimpledataobjs:
+                    shipoperation = allsimpledataobjs["ship_operation"]
+                    shipoperation = shipoperation.replace('/', '')
+                    shipoperation = shipoperation.replace('\\', '')
+                    shipoperation = shipoperation.replace('&', '')
+                    shipoperation = shipoperation.replace('<', '')
+                    shipoperation = shipoperation.replace('>', '')
+                    shipoperation = shipoperation.replace('"', '')
+                    shipoperation = shipoperation.replace("'", '')
+                    ship_operation.append(shipoperation)
+                else:
+                    ship_operation.append("")
+                if "operation_date" in allsimpledataobjs:
+                    operationdate = allsimpledataobjs["operation_date"]
+                    operationdate = operationdate.replace('/', '')
+                    operationdate = operationdate.replace('\\', '')
+                    operationdate = operationdate.replace('&', '')
+                    operationdate = operationdate.replace('<', '')
+                    operationdate = operationdate.replace('>', '')
+                    operationdate = operationdate.replace('"', '')
+                    operationdate = operationdate.replace("'", '')
+                    operation_date.append(operationdate)
+                else:
+                    operation_date.append("")
+                if "cable_type" in allsimpledataobjs:
+                    cable_type.append(allsimpledataobjs["cable_type"])
+                else:
+                    cable_type.append("")
+                if "slack_percent" in allsimpledataobjs:
+                    slackpercent = allsimpledataobjs["slack_percent"]
+                    slackpercent = slackpercent.replace('/', '')
+                    slackpercent = slackpercent.replace('\\', '')
+                    slackpercent = slackpercent.replace('&', '')
+                    slackpercent = slackpercent.replace('<', '')
+                    slackpercent = slackpercent.replace('>', '')
+                    slackpercent = slackpercent.replace('"', '')
+                    slackpercent = slackpercent.replace("'", '')
+                    slack_percent.append(slackpercent)
+                else:
+                    slack_percent.append("")
+                if "segment_name" in allsimpledataobjs:
+                    segmentname = allsimpledataobjs["segment_name"]
+                    segmentname = segmentname.replace('/', '')
+                    segmentname = segmentname.replace('\\', '')
+                    segmentname = segmentname.replace('&', '')
+                    segmentname = segmentname.replace('<', '')
+                    segmentname = segmentname.replace('>', '')
+                    segmentname = segmentname.replace('"', '')
+                    segmentname = segmentname.replace("'", '')
+                    segment_name.append(segmentname)
+                else:
+                    segment_name.append("")
+                if "system_type" in allsimpledataobjs:
+                    systemtype = allsimpledataobjs["system_type"]
+                    systemtype = systemtype.replace('/', '')
+                    systemtype = systemtype.replace('\\', '')
+                    systemtype = systemtype.replace('&', '')
+                    systemtype = systemtype.replace('<', '')
+                    systemtype = systemtype.replace('>', '')
+                    systemtype = systemtype.replace('"', '')
+                    systemtype = systemtype.replace("'", '')
+                    system_type.append(systemtype)
+                else:
+                    system_type.append("")
+                if "installation_year" in allsimpledataobjs:
+                    installationyear = allsimpledataobjs["installation_year"]
+                    installationyear = installationyear.replace('/', '')
+                    installationyear = installationyear.replace('\\', '')
+                    installationyear = installationyear.replace('&', '')
+                    installationyear = installationyear.replace('<', '')
+                    installationyear = installationyear.replace('>', '')
+                    installationyear = installationyear.replace('"', '')
+                    installationyear = installationyear.replace("'", '')
+                    installation_year.append(installationyear)
+                else:
+                    installation_year.append("")
+                if "out_of_service_year" in allsimpledataobjs:
+                    outofserviceyear = allsimpledataobjs["out_of_service_year"]
+                    outofserviceyear = outofserviceyear.replace('/', '')
+                    outofserviceyear = outofserviceyear.replace('\\', '')
+                    outofserviceyear = outofserviceyear.replace('&', '')
+                    outofserviceyear = outofserviceyear.replace('<', '')
+                    outofserviceyear = outofserviceyear.replace('>', '')
+                    outofserviceyear = outofserviceyear.replace('"', '')
+                    outofserviceyear = outofserviceyear.replace("'", '')
+                    out_of_service_year.append(outofserviceyear)
+                else:
+                    out_of_service_year.append("")
+                # Save coordinates within this placemark
+                placemark_coordinates.append(placemarkobj.find("coordinates"))
+                # Clear allsimpledataobjs, ready for next placemark within folder
+                allsimpledataobjs.clear()
+
+        cable_type_arr = cable_type
+        i = 0
+        while i <= len(placemark_coordinates):
+
+            try:
+                # For each set of coordinates in each placemark, add a new linestring to the kml
+                linestring = kml.newlinestring(name=folder_name,coords=process_coordinate_string(placemark_coordinates[i].string, True, "",""))
+                # For each set of simpledata attributes in each placemark, add new simpledata field with corrospoding value
+                linestring.extendeddata.schemadata.newsimpledata('system_name', system_name[i])
+                linestring.extendeddata.schemadata.newsimpledata('ship_operation', ship_operation[i])
+                linestring.extendeddata.schemadata.newsimpledata('operation_date', operation_date[i])
+                linestring.extendeddata.schemadata.newsimpledata('cable_type', cable_type[i])
+                linestring.extendeddata.schemadata.newsimpledata('slack_percent', slack_percent[i])
+                linestring.extendeddata.schemadata.newsimpledata('segment_name', segment_name[i])
+                linestring.extendeddata.schemadata.newsimpledata('system_type', system_type[i])
+                linestring.extendeddata.schemadata.newsimpledata('installation_year', installation_year[i])
+                linestring.extendeddata.schemadata.newsimpledata('out_of_service_year', out_of_service_year[i])
+            except IndexError:
+                break
+            # Increment i to cycle through placemark_coordinates and all the arrays
+            i += 1
+
+
+    # Remove chars from folder name to avoid error when creating a path and saving file
     folder_name.string = folder_name.string.replace('/', '')
     folder_name.string = folder_name.string.replace('\\', '')
+    folder_name.string = folder_name.string.replace('&', '')
+    folder_name.string = folder_name.string.replace('<', '')
+    folder_name.string = folder_name.string.replace('>', '')
+    folder_name.string = folder_name.string.replace('"', '')
+    folder_name.string = folder_name.string.replace("'", '')
 
     # Set KML name and save directory
     kmlname = os.path.join(UPLOAD_FOLDER, (folder_name.string + ".kml"))
     # Save KML
     kml.save(kmlname)
 
-
 @app.callback(Output('loading-output', 'children'),
               [Input('upload-files-div', 'isCompleted')],
-              [State('upload-files-div', 'fileNames')],)
+              [State('upload-files-div', 'fileNames')], )
 def upload_files(isCompleted, fileNames):
     """
     This function uploads and detects kmz files.
@@ -435,6 +611,7 @@ def upload_files(isCompleted, fileNames):
     Returns: Empty String. Responsible for starting extraction of KMZ file.
 
     """
+    global cable_type_arr
     if not isCompleted:
         # Returning list of length 2 to avoid loading error
         return ["", ""]
@@ -454,6 +631,8 @@ def upload_files(isCompleted, fileNames):
                 # Execute extract_KML() function for each folder in a different thread, parallel tasking, improving performance.
                 with ThreadPoolExecutor() as executor:
                     [executor.submit(extract_KML(folder=folder)) for folder in folder_list]
+                df = pd.DataFrame(cable_type_arr)
+                df.to_csv('cable_types.csv')
             else:
                 # Save file
                 file = Path(UPLOAD_FOLDER) / filename
@@ -481,6 +660,17 @@ def display_click_data(clickData):
             clickData["points"][0]["lon"], clickData["points"][0]["lat"], {"fontSize": 20, 'display': 'inline-block'},
             {"fontSize": 20, 'display': 'inline-block'})
 
+def reset_initial_fig():
+    initialFig = px.scatter_geo(color_discrete_sequence=["#ef553c", "#636efa"])
+    initialFig.update_geos(
+        resolution=50,
+        showframe=True,
+        showland=True, landcolor="Green",
+        showocean=True, oceancolor="LightBlue",
+        showcountries=True, countrycolor="Yellow",
+        showlakes=True, lakecolor="LightBlue")
+    initialFig.update_layout(clickmode='event+select', title=graph_name, title_x=0.55, title_font_family='sans-serif')
+    return initialFig
 
 @app.callback(
     Output('my-toggle-switch-output', 'children'),
@@ -528,7 +718,7 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
     global clipboardStyle
     global sorted_coordinates
     global unsorted_coordinates
-
+    global check
     # Find which action has been changed/pressed.
     changed_id = [p['prop_id'] for p in callback_context.triggered][0]
 
@@ -544,7 +734,7 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
         # Send selected kml filename to convertKMLToCSV function. Creates a csv containing all the coordinates of kml file
         convertKMLToCSV(value)
         # Set column names for dataframe
-        colnames = ['latitude', 'longitude']
+        colnames = ['latitude', 'longitude', 'cable_type', 'slack']
         # Save coordinates into a dataframe using the csv convertKMLToCSV function created
         df = pd.read_csv('coordinates.csv', names=colnames, header=None)
         # Initialise map with the dataframe of coordinates
@@ -559,19 +749,17 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                         showframe=True,
                         showland=True, landcolor="Green",
                         showocean=True, oceancolor="LightBlue",
-                        showcountries=True, countrycolor="Yellow")
+                        showcountries=True, countrycolor="Yellow",
+                        showlakes=True, lakecolor="LightBlue")
         # Apply fig to the global figure
         initialFig = fig
         return toggle, {
-            'display': 'none'}, kmlfiles, '', clipboardStyle, longSuggestion, clipboardStyle, latSuggestion, fig, False, False, ""
+            'display': 'none'}, kmlfiles, '', {'display': 'none'}, "", {
+                   'display': 'none'}, "", fig, False, False, ""
 
     # Check if Sort Coordinates button or Auto Create RPL button has been pressed
     if 'sort-coordinates-btn' in changed_id or 'auto-try-btn' in changed_id:
-        # Check if unsorted_coordinates is empty
-        if not unsorted_coordinates:
-            # Send, "Add to Map First", to the user as the coordinates have not been sorted yet
-            return toggle, {
-                'display': 'none'}, kmlfiles, 'Add to Map First', clipboardStyle, longSuggestion, clipboardStyle, latSuggestion, px.scatter_geo(), False, False, ""
+        check = True
         # Check if Lon and Lat are not None
         if lon and lat:
             # Check lon and lat are numbers
@@ -584,15 +772,28 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                     float(lat)
                 except ValueError:
                     return toggle, {
-                        'display': 'none'}, kmlfiles, 'Enter Int or Float', clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, initialFig, False, False, ""
+                        'display': 'none'}, kmlfiles, 'Please ensure the coordinates are numbers', clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, initialFig, False, False, ""
             # Save order_section result
             result = order_section(lat, lon)
             # Save coordinates to be used in next loop
             prev_coor = [(lon, lat)]
+            # If a coordinate has been selected in the middle and auto try button pressed
+            #route = pd.read_csv(f'unsorted.csv', dtype=str)
+            #lengthunsort = len(route)
+            #test = route[0]
+            #if result == route[0] or result == route[lengthunsort]:
+            #    pass
+            #else:
+            # TODO Improve this
+            startormiddle = findNextPoint(result[0],result[1], "StartOrEnd")
+            if type(startormiddle) == str:
+                if startormiddle == "Not an end of cable":
+                    return toggle, {
+                            'display': 'none'}, kmlfiles, 'Please select a coordinate at the start or end of the cable', clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, initialFig, False, False, ""
+            # TODO Remove this
             # Save result to be used in next loop
             prev_result = result
             l = 0
-            # TODO why does it return a list when there is an overlap
             # If there is an overlap, result returns a list
             while type(result) == list:
                 # Create unsorted dataframe from unsorted.csv
@@ -610,11 +811,23 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                                 showframe=True,
                                 showland=True, landcolor="Green",
                                 showocean=True, oceancolor="LightBlue",
-                                showcountries=True, countrycolor="Yellow")
+                                showcountries=True, countrycolor="Yellow",
+                                showlakes=True, lakecolor="LightBlue")
                 fig.update_traces(marker=dict(size=4))
                 initialFig = fig
+                # Check lon and lat are numbers
+                try:
+                    int(result[0])
+                    int(result[1])
+                except ValueError:
+                    try:
+                        float(result[0])
+                        float(result[1])
+                    except ValueError:
+                        return toggle, {
+                            'display': 'none'}, kmlfiles, 'Please ensure the coordinates are numbers', {'display': 'none'}, "", {'display': 'none'}, "", initialFig, False, False, ""
                 # Get suggested next coordinates by sending lat and lon
-                suggestedNextCoordinates = findNextPoint(result[0], result[1])
+                suggestedNextCoordinates = findNextPoint(result[0], result[1], "")
                 # The style of the coordinates to be copied by the user
                 clipboardStyle = {"fontSize": 20, 'display': 'inline-block'}
                 # Save suggested next coordinates individually as lat and long
@@ -637,12 +850,21 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                         l -= 1
                         # Attempt to order section with previous coordinates, until no overlap.
                         result = order_section(prev_coor[l][0], prev_coor[l][1])
+                        # Attempt to order section with next coordinates if previous coordinates did not work.
+                        if prev_coor[len(prev_coor) - 3] == prev_coor[len(prev_coor) - 2] and prev_coor[len(prev_coor) - 2] == prev_coor[len(prev_coor) - 1]:
+                            # Get coordinate after the next suggested.
+                            suggestedNextCoordinates = findNextPoint(latSuggestion, longSuggestion, "forward")
+                            latSuggestion = suggestedNextCoordinates[0]
+                            longSuggestion = suggestedNextCoordinates[1]
+                            result = order_section(latSuggestion, longSuggestion)
+
                         # Prevent Infinite Loop
                         if prev_coor[l] == prev_coor[l - 1]:
                             # Delete previous entry as duplicate
                             del prev_coor[-1]
                             return toggle, {
-                                'display': 'none'}, kmlfiles, suggestedCoordinates, clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, fig, False, False, ""
+                                'display': 'none'}, kmlfiles, suggestedCoordinates, clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, initialFig, False, False, ""
+
 
                 if toggle == True:
                     # Indicates an overlap
@@ -666,11 +888,13 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                     prev_result = result
                     # Increment counter
                     l += 1
+
             else:
                 # Save sorted.csv into a dataframe
-                sorteddf = pd.read_csv(f'sorted.csv')
+                sorteddf2 = pd.read_csv(f'sorted.csv')
+
                 # Initialise graph with sorted.csv
-                fig = px.scatter_geo(sorteddf, lat='Latitude', lon='Longitude', hover_name="Colour", color="Colour",
+                fig = px.scatter_geo(sorteddf2, lat='Latitude', lon='Longitude', hover_name="Colour", color="Colour",
                                      color_discrete_sequence=["#636efa", "#ef553c"], labels={"Colour": "Key"})
                 fig.update_layout(title=graph_name, title_x=0.55)
                 fig.update_traces(marker=dict(size=4))
@@ -679,7 +903,8 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                                 showframe=True,
                                 showland=True, landcolor="Green",
                                 showocean=True, oceancolor="LightBlue",
-                                showcountries=True, countrycolor="Yellow")
+                                showcountries=True, countrycolor="Yellow",
+                                showlakes=True, lakecolor="LightBlue")
 
                 # Save sorted.csv into a dataframe without colour column
                 sortedCoordinates = (pd.read_csv(f'sorted.csv')).drop(['Colour'], axis=1)
@@ -695,15 +920,25 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
                 # Delete sorted.csv
                 os.remove("sorted.csv")
                 os.remove("sortedCoordinates.csv")
+                initialFig = fig
+                # Clear sorted coordinates to avoid multiple cable routes being displayed after sorting more than 1 cable without restarting server
+                sorted_coordinates.clear()
                 return toggle, {'display': 'inline-block', }, kmlfiles, result, {"fontSize": 0,
                                                                                  'display': 'inline-block'}, '', {
                            "fontSize": 0, 'display': 'inline-block'}, '', fig, True, True, ""
         else:
             return toggle, {
-                'display': 'none'}, kmlfiles, 'Please enter Coordinates', clipboardStyle, longSuggestion, clipboardStyle, latSuggestion, initialFig, False, False, ""
+                'display': 'none'}, kmlfiles, 'Please enter coordinates', clipboardStyle, longSuggestion, clipboardStyle, latSuggestion, initialFig, False, False, ""
     else:
-        return toggle, {
+        if check:
+            check = False
+            return toggle, {
             'display': 'none'}, kmlfiles, suggestedCoordinates, clipboardStyle, latSuggestion, clipboardStyle, longSuggestion, initialFig, False, False, ""
+        else:
+            return toggle, {
+                'display': 'none'}, kmlfiles, '', {'display': 'none'}, "", {
+                       'display': 'none'}, "", initialFig, False, False, ""
+
 
 
 def creatRPLTemplate(coordinates):
@@ -714,6 +949,7 @@ def creatRPLTemplate(coordinates):
     """
     global graph_name
     global dir_path
+    global segment_name
     # Load RPL template
     wrkbk = openpyxl.load_workbook('RPLTemplate.xlsx')
     # Load current sheet in RPLTemplate, there is only one sheet
@@ -722,9 +958,23 @@ def creatRPLTemplate(coordinates):
     i = 7
     # Loop through dataframe of coordinates
     for index, row in coordinates.iterrows():
-        # Split integer and fractional parts of longitude and latitude
-        latFrac, LatWhole = math.modf(row['Latitude'])
-        longFrac, longWhole = math.modf(row['Longitude'])
+        # Split integer and fractional parts of longitude and latitude using string method as this is the most accurate.
+        #latFrac, LatWhole = math.modf(row['Latitude'])
+        strlat = str(row['Latitude'])
+        strlat = strlat.split(".")
+
+        LatWhole = int(strlat[0])
+        latFrac = "." + strlat[1]
+        latFrac = float(latFrac)
+
+        #longFrac, longWhole = math.modf(row['Longitude'])
+        strlong = str(row['Longitude'])
+        strlong = strlong.split(".")
+
+        longWhole = int(strlong[0])
+        longFrac = "." + strlong[1]
+        longFrac = float(longFrac)
+
         # lat
         sh.cell(row=i, column=3).value = LatWhole
         sh.cell(row=i, column=4).value = latFrac * 60
@@ -733,6 +983,10 @@ def creatRPLTemplate(coordinates):
         sh.cell(row=i, column=6).value = longWhole
         sh.cell(row=i, column=7).value = longFrac * 60
         sh.cell(row=i, column=8).value = 'E' if longWhole > 0 else 'W'
+        # cable type (row=i+1 as cable type is on row below coordinates)
+        sh.cell(row=i+1, column=27).value = row['Cable_Type']
+        # slack
+        sh.cell(row=i+1, column=24).value = row['Slack']
         # Increment row by 2 as next row in RPLTemplate should not be filled
         i += 2
     # Calculate number of rows left
@@ -742,10 +996,10 @@ def creatRPLTemplate(coordinates):
 
     # ------------ Rename sheet name with segment name --------------
 
-    # Find segment name
-    # TODO implement more ways of finding segment name from KML.
     if "seg" in graph_name or "Seg" in graph_name:
         segment_name = graph_name.split("seg", 1)[1] or graph_name.split("Seg", 1)[1]
+    elif segment_name:
+        segment_name = segment_name
     else:
         segment_name = "Unknown Segment"
 
@@ -792,7 +1046,7 @@ def creatRPLTemplate(coordinates):
         os.rename(filepath, pre + '.xls')
 
 
-def process_coordinate_string(coor_str, kmz):
+def process_coordinate_string(coor_str, kmz, cable_type, slack):
     """
     This function breaks the string of coordinates into [Lat,Lon,Lat,Lon...] for a CSV row
     Params: coor_str: String of coordinates
@@ -803,63 +1057,377 @@ def process_coordinate_string(coor_str, kmz):
     # Clean string of \n and \t
     coor_str = coor_str.strip()
 
-    # TODO IF ERROR, ADD ERROR IN FOR USER WITHOUT HAVING CALLBACK ON.
+    # Split string by spaces
     unclean_space_splits = coor_str.split(" ")
     space_splits = []
+    # Loop through unclean_space_splits
     for x in unclean_space_splits:
-        # print("x= ", x)
-        # for char in range(len(x)):
-        # print(x[char])
-        # print("x[1:2]= ", x[1:2])
-        # print("x[0:1]= ", x[0:1])
-
+        # Check if a section is a digit
         if x[1:2].isdigit() or x[0:1].isdigit():
+            # If digit add to space_splits
             space_splits.append(x)
-    # space_splits = [x for x in unclean_space_splits if x[1:2].isdigit()]
 
-    # print(unclean_space_splits[3][:5])
-    # print(type(unclean_space_splits[0]))
+    # Set number of rows as length of space_splits list
     rows = len(space_splits)
-    ret = [[0 for x in range(2)] for y in range(rows)]
+    ret = [[0 for x in range(4)] for y in range(rows)]
     for count, value in enumerate(space_splits, start=0):
         comma_split = value.split(',')
         if kmz is True:
+            if slack != "":
+                ret[count][3] = (slack)  # slack
+            if cable_type != "":
+                ret[count][2] = (cable_type)  # cable_type
+
             ret[count][1] = (comma_split[1])  # lat
             ret[count][0] = (comma_split[0])  # lng
         else:
             ret[count][0] = (comma_split[1])  # lat
             ret[count][1] = (comma_split[0])  # lng
+            if slack != "":
+                ret[count][3] = (slack) # slack
+            if cable_type != "":
+                ret[count][2] = (cable_type)  # cable_type
     return ret
 
 
-# CALLBACK error value
 def convertKMLToCSV(value):
+    """
+    This function converts KML into a CSV of coordinates from the KML.
+    Params: Value: KML filename
+    Returns: Nothing as it creates a coordinates.csv in the file directory
+    """
     global graph_name
     global sorted_coordinates
     global unsorted_coordinates
+    global segment_name
+    global header_check
+    global header_check_cable_type
+
+    header_check = False
+    header_check_cable_type = False
+    # Empty unsorted coordinates variable
     unsorted_coordinates.clear()
+    # If .csv exists, delete
     if os.path.exists("coordinates.csv"):
         os.remove("coordinates.csv")
-    kml_filename = os.path.join(UPLOAD_FOLDER, value)
+    if os.path.exists("coordinates_Cable_Type.csv"):
+        os.remove("coordinates_Cable_Type.csv")
+    if os.path.exists("coordinates_no_cable_type.csv"):
+        os.remove("coordinates_no_cable_type.csv")
 
+    # Create directory for kml filename
+    kml_filename = os.path.join(UPLOAD_FOLDER, value)
+    allsimpledataobjs = {}
+    # Load all cable types from cable_types.csv into cable_types_list
+    with open('cable_types.csv', newline='') as csvfile:
+        cable_types_list = list(csv.reader(csvfile))
+
+    cable_types = []
+    # Iterate through sublist within cable_types_list
+    for sublist in cable_types_list:
+        # Iterate through each item within the sublist
+        for item in sublist:
+            # Append each cable type into cable_types array
+            cable_types.append(item)
+    # Open kml file
     with open(kml_filename, 'r') as f:
         s = BeautifulSoup(f, 'xml')
-        # If name is none, name graph filename
+        # Find name in kml file
         if s.find('Schema'):
             graph_name = s.find('Schema')['name']
         else:
             # Save graph name as file name.
             # Save first index 0 from split as index 1 is the file extension, .kml
             graph_name = os.path.basename(os.path.splitext(kml_filename)[0])
-        for coords in s.find_all('coordinates'):
-            file = open(r'coordinates.csv', 'a', newline='')
-            with file:
-                write = csv.writer(file)
-                write.writerows([" "])
-                section = process_coordinate_string(coords.string, False)
-                write.writerows(section)
-                unsorted_coordinates.append(section)
+        # Check if there are placemarks in KML
+        if s.find_all('Placemark'):
+            # Find all placemarks
+            placemark = s.find_all('Placemark')
+            # Iterate through each placemark
+            for placemarkobj in placemark:
+                # Check if placemark object contains simpledata fields
+                if placemarkobj.find_all('SimpleData'):
+                    # Find all simpledata tags
+                    simpledata = placemarkobj.find_all("SimpleData")
 
+                    # Cycle through each simpledata tag, saving to allsimpledataobjs dict
+                    for simpledataobj in simpledata:
+                        # Save each simpledata attribute name and the associated value
+                        allsimpledataobjs[simpledataobj.get('name')] = simpledataobj.text
+
+                    # Cycle through each simpledata attribute adding the value to associated attribute array
+                    if "cable_type" in allsimpledataobjs:
+                        cable_type = allsimpledataobjs["cable_type"]
+                    else:
+                        cable_type = ""
+
+                    if "slack_percent" in allsimpledataobjs:
+                        # Find slack in simple data
+                        slackpercent = allsimpledataobjs["slack_percent"]
+                        # Clean
+                        slackpercent = slackpercent.replace('/', '')
+                        slackpercent = slackpercent.replace('\\', '')
+                        slackpercent = slackpercent.replace('&', '')
+                        slackpercent = slackpercent.replace('<', '')
+                        slackpercent = slackpercent.replace('>', '')
+                        slackpercent = slackpercent.replace('"', '')
+                        slackpercent = slackpercent.replace("'", '')
+                        slack_percent = slackpercent
+                    else:
+                        slack_percent = ""
+
+                    if "segment_name" in allsimpledataobjs:
+                        # Find segment name in simple data
+                        segmentname = allsimpledataobjs["segment_name"]
+                        # Clean
+                        segmentname = segmentname.replace('/', '')
+                        segmentname = segmentname.replace('\\', '')
+                        segmentname = segmentname.replace('&', '')
+                        segmentname = segmentname.replace('<', '')
+                        segmentname = segmentname.replace('>', '')
+                        segmentname = segmentname.replace('"', '')
+                        segmentname = segmentname.replace("'", '')
+                        segment_name = segmentname
+                    else:
+                        segment_name = ""
+                    CoordsToCSV(placemarkobj.find("coordinates"), cable_type, slack_percent)
+                    # Clear allsimpledataobjs, ready for next placemark within folder
+                    allsimpledataobjs.clear()
+
+                elif placemarkobj.find("name").text in cable_types:
+                    # Get coordinates
+                    coordinates = placemarkobj.find_all("coordinates")
+                    # Put coordinates into CSV
+                    CoordsToCSV(coordinates, placemarkobj.find("name").text, "")
+                else:
+                    # --------- No cable types found --------- #
+                    # If a point, don't save coordinate as it is not part of the RPL
+                    if placemarkobj.find_all("Point"):
+                        print(placemarkobj.find("name").text)
+                        continue
+                    # Put coordinates into CSV
+                    CoordsToCSV(placemarkobj.find_all("coordinates"), "", "")
+
+        else:
+            # --------- No placemarks found --------- #
+            CoordsToCSV(s.find_all('coordinates'), "", "")
+
+    CheckCSV()
+
+def CheckCSV():
+    """
+    This function checks for any duplicates within the coordinates and favours the cable type coordinates over the non
+    cable type coordinates.
+    Return: Creates coordinates.csv
+    """
+    global unsorted_coordinates
+    global unsorted_coordinates_cable_types
+    global unsorted_coordinates_no_cable_types
+
+    # Save file paths for csv's
+    coordinates_csv_Cable_type_Path = os.path.join(dir_path, "coordinates_Cable_Type.csv")
+    coordinates_csv_Path = os.path.join(dir_path, "coordinates_no_cable_type.csv")
+
+    # Check if both csv's are present
+    if Path(coordinates_csv_Cable_type_Path).is_file() and Path(coordinates_csv_Path).is_file():
+        # Read both csv's into dataframes
+        df_coordinates = pd.read_csv('coordinates_no_cable_type.csv')
+        df_coordinates_cable_types = pd.read_csv('coordinates_Cable_Type.csv')
+
+        # Read only long and lat columns from both csv's into dataframes
+        df_coordinates_long_lat = pd.read_csv('coordinates_no_cable_type.csv', usecols=["long", "lat"])
+        df_coordinates_cable_types_long_lat = pd.read_csv('coordinates_Cable_Type.csv', usecols=["long", "lat"])
+
+        # Convert long and lat dataframes into arrays
+        df1array = df_coordinates_long_lat.to_numpy()
+        df2array = df_coordinates_cable_types_long_lat.to_numpy()
+
+        # Check if df1array size is larger than df2array size
+        if df1array.shape[0] > df2array.shape[0]:
+            # Save df1array as largest array using deepcopy so changing one array does not impact the other
+            longestarray = deepcopy(df1array)
+            # Save df_coordinates as longestdataframe
+            longestdataframe = deepcopy(df_coordinates)
+            # Save df2array as other array
+            otherarray = deepcopy(df2array)
+            # Save df_coordinates_cable_types as otherdataframe
+            otherdataframe = deepcopy(df_coordinates_cable_types)
+        else:
+            # Save df2array as largest array
+            longestarray = deepcopy(df2array)
+            # Save df_coordinates_cable_types as longestdataframe
+            longestdataframe = deepcopy(df_coordinates_cable_types)
+            # Save df1array as other array
+            otherarray = deepcopy(df1array)
+            # Save df_coordinates as otherdataframe
+            otherdataframe = deepcopy(df_coordinates)
+
+        # Set variables
+        numberoftimesappeared = 0
+        numberoftimenotappeared = 0
+        notindf2 = []
+        i = 0
+
+        # Using the longestarray size, loop through checking for duplicates in otherarray
+        while i <= (longestarray.shape[0] - 1):
+
+            # Check for duplicates between arrays
+            if longestarray[i] in otherarray:
+                # Keep count of how many times there are duplicates
+                numberoftimesappeared += 1
+            else:
+                # Keep count of how many times there are not duplicates
+                numberoftimenotappeared += 1
+
+                # Append coordinates which are not in the otherarray
+                notindf2.append(longestdataframe.values[i])
+            # Increment i
+            i += 1
+
+        # If numberoftimesappeared is equal to the size of the array
+        if numberoftimesappeared == longestarray.shape[0]:
+            # Convert df_coordinates_cable_types dataframe into csv
+            df_coordinates_cable_types.to_csv('coordinates.csv', index=False)
+            # Read the csv back into dataframe
+            df = pd.read_csv('coordinates.csv')
+            # Drop duplicates across long lat and cable_type columns
+            df.drop_duplicates(subset=['long', 'lat', 'Cable_Type'], inplace=True)
+            # Create csv without the duplicates
+            df.to_csv('coordinates.csv', index=False)
+            # Put values from CSV into unsorted_coordinates array
+            CSVToArray()
+        # Put coordinates not in array, into array, ensuring no coordinates are missed.
+        # This catches kml files with some sections with a known cable type and others which do not, all inside the same KML
+        else:
+            # Loop through coordinates not in other array
+            for item in notindf2:
+                # Append coordinates which are not in other array into df_coordinates_cable_types as a dataframe
+                df_coordinates_cable_types.append(pd.DataFrame(item.reshape(1,-1), columns=list(df_coordinates_cable_types)), ignore_index=True)
+            # Convert dataframe of coordinates to csv
+            df_coordinates_cable_types.to_csv('coordinates.csv', index=False)
+            df = pd.read_csv('coordinates.csv')
+            df.drop_duplicates(subset=['long', 'lat', 'Cable_Type'], inplace=True)
+            df.to_csv('coordinates.csv', index=False)
+            CSVToArray()
+
+    elif Path(coordinates_csv_Cable_type_Path).is_file():
+        df = pd.read_csv('coordinates_Cable_Type.csv')
+        df.drop_duplicates(subset=['long', 'lat', 'Cable_Type'], inplace=True)
+        df.to_csv('coordinates.csv', index=False)
+        CSVToArray()
+
+    elif Path(coordinates_csv_Path).is_file():
+        df = pd.read_csv('coordinates_no_cable_type.csv')
+        df.drop_duplicates(subset=['long', 'lat', 'Cable_Type'], inplace=True)
+        df.to_csv('coordinates.csv', index=False)
+        CSVToArray()
+
+    unsorted_coordinates_cable_types.clear()
+    unsorted_coordinates_no_cable_types.clear()
+
+def CSVToArray():
+    global unsorted_coordinates
+    global unsorted_coordinates_cable_types
+
+    i = 0
+    # Clear unsorted_coordinates_cable_types array
+    unsorted_coordinates_cable_types.clear()
+    # Open coordinates.csv
+    with open('coordinates.csv', 'r') as csvfile:
+        # Iterate through each row in the csv file
+        for row in csv.reader(csvfile):
+            # If row is equal to the heading, skip
+            if row == ["long", "lat", "Cable_Type", "Slack"]:
+                continue
+            # If the first 7 characters of column 0, long, does not equal section
+            if row[0][:7] != "section":
+
+                try:
+                    # Attempt to append coordinates into array using an index, indicating the same section.
+                    unsorted_coordinates_cable_types[i].append(row)
+                except IndexError:
+                    # If the section, index, has not been created yet, just add the coordinates, this creates the index, section.
+                    unsorted_coordinates_cable_types.append([row])
+            else:
+                # Increment i
+                i += 1
+    # Deepcopy unsorted_coordinates_cable_types to unsorted_coordinates.
+    unsorted_coordinates = deepcopy(unsorted_coordinates_cable_types)
+
+
+def CoordsToCSV(allCoords, cable_type, slack):
+    """
+    This function converts coordinates array into a relevant csv, depending on whether the coordinate contains a cable
+    type/slack or not.
+    :param allCoords:
+    :param cable_type:
+    :param slack:
+    :return: Creates coordinates_Cable_Type.csv and/or coordinates_no_cable_type.csv
+    """
+    global unsorted_coordinates_cable_types
+    global unsorted_coordinates_no_cable_types
+    global prev_del
+    global header_check
+    global header_check_cable_type
+    global number
+
+    # Save coordinates from kml file into csv's
+    for coords in allCoords:
+        # Save section
+        section = process_coordinate_string(coords.string, False, cable_type, slack)
+        # Create cable_type csv if cable type is present
+        if section[0][2] != 0:
+            with open(r'coordinates_Cable_Type.csv', 'a', newline='') as file:
+                write = csv.writer(file)
+                # Write header for CSV file if a header has not already been created
+                if header_check_cable_type is False:
+                    write.writerow(["long", "lat", "Cable_Type", "Slack"])
+                    header_check_cable_type = True
+                else:
+                    # Create a delineation between each section which is unique so pandas dataframe,
+                    # does not automatically remove it when putting it into a dataframe later on
+                    write.writerow(["section"+str(number), "section"+str(number+1), " ", " "])
+                    number += 1
+                # Write section into CSV
+                write.writerows(section)
+                unsorted_coordinates_cable_types.append(section)
+        else:
+            with open(r'coordinates_no_cable_type.csv', 'a', newline='') as file:
+                write = csv.writer(file)
+                if header_check is False:
+                    write.writerow(["long", "lat", "Cable_Type", "Slack"])
+                    header_check = True
+                else:
+                    write.writerow(["section"+str(number), "section"+str(number+1), " ", " "])
+                    number += 1
+
+                write.writerows(section)
+                unsorted_coordinates_no_cable_types.append(section)
+
+
+def list_contains(List1, List2):
+    """
+    This function checks if one list contains more than 2 elements in another list, if so it returns True.
+    :param List1:
+    :param List2:
+    :return:
+    """
+    check = False
+    num = 0
+    # Iterate in the 1st list
+    for m in List1:
+
+        # Iterate in the 2nd list
+        for n in List2:
+
+            # if there is a match
+            if m == n:
+                num += 1
+                if num > 2:
+                    check = True
+                    return check
+
+    return check
 
 def appendColumnToArray(coordinates, column):
     full = np.full((len(coordinates), 1), column)
@@ -870,12 +1438,15 @@ def appendColumnToArray(coordinates, column):
 def order_section(lat, lon):
     global sorted_coordinates
     global unsorted_coordinates
-    starting = [lat, lon]
+    cable_type = unsorted_coordinates[0][0][2]
+    slack = unsorted_coordinates[0][0][3]
+    starting = [lat, lon, cable_type, slack]
     sorted = coordinates_found = coordinates_added = False
     section_start = len(sorted_coordinates)
     starting_coordinates = starting.copy()
     while sorted == False:
         coordinates_found = False
+
         for section in unsorted_coordinates:
             if section[0][0] == starting_coordinates[0] and section[0][1] == starting_coordinates[1]:
                 starting_coordinates = (section[(len(section) - 1)]).copy()
@@ -895,7 +1466,7 @@ def order_section(lat, lon):
             if coordinates_added == True:
                 sorted_coordinates[section_start].insert(0, starting)
                 section_start = len(sorted_coordinates)
-            headings = ["Latitude", "Longitude", "Colour"]
+            headings = ["Latitude", "Longitude","Cable_Type", "Slack", "Colour"]
             # unsorted and sorted to csv
             with open("sorted.csv", "w+") as my_csv:
                 csvWriter = csv.writer(my_csv, delimiter=',')
@@ -914,17 +1485,36 @@ def order_section(lat, lon):
                 sorted = True
                 if os.path.exists("unsorted.csv"):
                     os.remove("unsorted.csv")
+
                 return "Coordinates sorted, ", "RPL_" + graph_name + ".xls created"
             else:
                 return [starting_coordinates[0], starting_coordinates[1]]
 
 
-def findNextPoint(lat, lon):
-    x = np.array([[lat, lon]])
-    route = pd.read_csv(f'unsorted.csv', dtype=str)
-    route = route.drop(['Colour'], axis=1)
-    route = route.to_numpy()
-    dist = euclidean_distances(x, route)
-    index = np.argmin(euclidean_distances(x, route))
-    return route[index]
+def findNextPoint(lat, lon, fororback):
 
+    x = np.array([[lat, lon]])
+    if x[0][0] == "Coordinates sorted, ":
+        return x
+    route = pd.read_csv(f'unsorted.csv', dtype=str)
+
+    route = route.drop(['Colour'], axis=1)
+    route = route.drop(['Cable_Type'], axis=1)
+    route = route.drop(['Slack'], axis=1)
+    route = route.to_numpy()
+    index = np.argmin(euclidean_distances(x, route))
+    # TODO Remove this if needed.
+    if fororback == "StartOrEnd":
+        if index != 0 and index+1 != len(route):
+            return "Not an end of cable"
+    if fororback == "forward":
+        try:
+            return route[index+1]
+        except IndexError:
+            return route[index]
+    else:
+        return route[index]
+
+#if __name__ == "__main__":
+#    app.layout = RPL_layout()
+#    app.run_server(debug=True)

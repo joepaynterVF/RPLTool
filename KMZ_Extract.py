@@ -9,7 +9,7 @@ from dash import dcc, html, Input, Output
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
-from RPLTool import app, server, process_coordinate_string, quit1
+from RPLTool import app, server, quit1
 import dash_bootstrap_components as dbc
 
 # Get current operating directory
@@ -81,7 +81,7 @@ def create_page_KMZ_extract():
                         'display': 'inline-block'
                     }),
                 dcc.Loading(
-                    id="loading-11",
+                    id="loading-12",
                     type="default",
                     children=[html.Div(id="loading-output-download-all")],
                     style={
@@ -170,6 +170,39 @@ def file_download_link(filename):
     location = "/download/{}".format(urlquote(filename))
     return html.A(filename, href=location)
 
+def process_coordinate_string(coor_str, kmz):
+    """
+    This function breaks the string of coordinates into [Lat,Lon,Lat,Lon...] for a CSV row
+    Params: coor_str: String of coordinates
+            kmz: If KMZ or not. bool, True or False
+    Returns: A list of lists containing latitude and longitude coordinates. [[lat, lon],[lat, lon]]
+    """
+
+    # Clean string of \n and \t
+    coor_str = coor_str.strip()
+
+    # Split string by spaces
+    unclean_space_splits = coor_str.split(" ")
+    space_splits = []
+    # Loop through unclean_space_splits
+    for x in unclean_space_splits:
+        # Check if a section is a digit
+        if x[1:2].isdigit() or x[0:1].isdigit():
+            # If digit add to space_splits
+            space_splits.append(x)
+
+    # Set number of rows as length of space_splits list
+    rows = len(space_splits)
+    ret = [[0 for x in range(2)] for y in range(rows)]
+    for count, value in enumerate(space_splits, start=0):
+        comma_split = value.split(',')
+        if kmz is True:
+            ret[count][1] = (comma_split[1])  # lat
+            ret[count][0] = (comma_split[0])  # lng
+        else:
+            ret[count][0] = (comma_split[1])  # lat
+            ret[count][1] = (comma_split[0])  # lng
+    return ret
 
 def extract_KML(folder):
     """
@@ -183,13 +216,169 @@ def extract_KML(folder):
     folder_name = folder.find('name')
     # Find all coordinates in that folder
     coordinates = folder.find_all('coordinates')
+    placemark_coordinates = []
+    system_name = []
+    ship_operation = []
+    operation_date = []
+    cable_type = []
+    slack_percent = []
+    segment_name = []
+    system_type = []
+    installation_year = []
+    out_of_service_year = []
+    allsimpledataobjs = {}
 
-    # For each set of coordinates in that folder, add a new linestring to the kml
-    for coor in coordinates:
-        kml.newlinestring(name=folder_name, coords=process_coordinate_string(coor.string, True))
-    # Remove slashes from folder name to avoid error when creating a path and saving file
+    if folder.find_all('Placemark'):
+        # Find all placemarks in folder
+        placemarks = folder.find_all('Placemark')
+        # For each placemark object in each placemark
+        for placemarkobj in placemarks:
+            if placemarkobj.find_all('SimpleData'):
+                # Find all simpledata tags
+                simpledata = placemarkobj.find_all("SimpleData")
+
+                # Cycle through each simpledata tag, saving to allsimpledataobjs dict
+                for simpledataobj in simpledata:
+                    # Save each simpledata attribute name and the associated value
+                    allsimpledataobjs[simpledataobj.get('name')] = simpledataobj.text
+
+                # Cycle through each simpledata attribute adding the value to associate attribute array
+                if "system_name" in allsimpledataobjs:
+                    systemname = allsimpledataobjs["system_name"]
+                    # Clean value so XML does not throw an error.
+                    systemname = systemname.replace('/', '')
+                    systemname = systemname.replace('\\', '')
+                    systemname = systemname.replace('&', '')
+                    systemname = systemname.replace('<', '')
+                    systemname = systemname.replace('>', '')
+                    systemname = systemname.replace('"', '')
+                    systemname = systemname.replace("'", '')
+                    system_name.append(systemname)
+                else:
+                    # If attribute not in simpledata array within KML, append empty field
+                    system_name.append("")
+                if "ship_operation" in allsimpledataobjs:
+                    shipoperation = allsimpledataobjs["ship_operation"]
+                    shipoperation = shipoperation.replace('/', '')
+                    shipoperation = shipoperation.replace('\\', '')
+                    shipoperation = shipoperation.replace('&', '')
+                    shipoperation = shipoperation.replace('<', '')
+                    shipoperation = shipoperation.replace('>', '')
+                    shipoperation = shipoperation.replace('"', '')
+                    shipoperation = shipoperation.replace("'", '')
+                    ship_operation.append(shipoperation)
+                else:
+                    ship_operation.append("")
+                if "operation_date" in allsimpledataobjs:
+                    operationdate = allsimpledataobjs["operation_date"]
+                    operationdate = operationdate.replace('/', '')
+                    operationdate = operationdate.replace('\\', '')
+                    operationdate = operationdate.replace('&', '')
+                    operationdate = operationdate.replace('<', '')
+                    operationdate = operationdate.replace('>', '')
+                    operationdate = operationdate.replace('"', '')
+                    operationdate = operationdate.replace("'", '')
+                    operation_date.append(operationdate)
+                else:
+                    operation_date.append("")
+                if "cable_type" in allsimpledataobjs:
+                    cable_type.append(allsimpledataobjs["cable_type"])
+                else:
+                    cable_type.append("")
+                if "slack_percent" in allsimpledataobjs:
+                    slackpercent = allsimpledataobjs["slack_percent"]
+                    slackpercent = slackpercent.replace('/', '')
+                    slackpercent = slackpercent.replace('\\', '')
+                    slackpercent = slackpercent.replace('&', '')
+                    slackpercent = slackpercent.replace('<', '')
+                    slackpercent = slackpercent.replace('>', '')
+                    slackpercent = slackpercent.replace('"', '')
+                    slackpercent = slackpercent.replace("'", '')
+                    slack_percent.append(slackpercent)
+                else:
+                    slack_percent.append("")
+                if "segment_name" in allsimpledataobjs:
+                    segmentname = allsimpledataobjs["segment_name"]
+                    segmentname = segmentname.replace('/', '')
+                    segmentname = segmentname.replace('\\', '')
+                    segmentname = segmentname.replace('&', '')
+                    segmentname = segmentname.replace('<', '')
+                    segmentname = segmentname.replace('>', '')
+                    segmentname = segmentname.replace('"', '')
+                    segmentname = segmentname.replace("'", '')
+                    segment_name.append(segmentname)
+                else:
+                    segment_name.append("")
+                if "system_type" in allsimpledataobjs:
+                    systemtype = allsimpledataobjs["system_type"]
+                    systemtype = systemtype.replace('/', '')
+                    systemtype = systemtype.replace('\\', '')
+                    systemtype = systemtype.replace('&', '')
+                    systemtype = systemtype.replace('<', '')
+                    systemtype = systemtype.replace('>', '')
+                    systemtype = systemtype.replace('"', '')
+                    systemtype = systemtype.replace("'", '')
+                    system_type.append(systemtype)
+                else:
+                    system_type.append("")
+                if "installation_year" in allsimpledataobjs:
+                    installationyear = allsimpledataobjs["installation_year"]
+                    installationyear = installationyear.replace('/', '')
+                    installationyear = installationyear.replace('\\', '')
+                    installationyear = installationyear.replace('&', '')
+                    installationyear = installationyear.replace('<', '')
+                    installationyear = installationyear.replace('>', '')
+                    installationyear = installationyear.replace('"', '')
+                    installationyear = installationyear.replace("'", '')
+                    installation_year.append(installationyear)
+                else:
+                    installation_year.append("")
+                if "out_of_service_year" in allsimpledataobjs:
+                    outofserviceyear = allsimpledataobjs["out_of_service_year"]
+                    outofserviceyear = outofserviceyear.replace('/', '')
+                    outofserviceyear = outofserviceyear.replace('\\', '')
+                    outofserviceyear = outofserviceyear.replace('&', '')
+                    outofserviceyear = outofserviceyear.replace('<', '')
+                    outofserviceyear = outofserviceyear.replace('>', '')
+                    outofserviceyear = outofserviceyear.replace('"', '')
+                    outofserviceyear = outofserviceyear.replace("'", '')
+                    out_of_service_year.append(outofserviceyear)
+                else:
+                    out_of_service_year.append("")
+                # Save coordinates within this placemark
+                placemark_coordinates.append(placemarkobj.find("coordinates"))
+                # Clear allsimpledataobjs, ready for next placemark within folder
+                allsimpledataobjs.clear()
+
+        i = 0
+        while i <= len(placemark_coordinates):
+
+            try:
+                # For each set of coordinates in each placemark, add a new linestring to the kml
+                linestring = kml.newlinestring(name=folder_name,coords=process_coordinate_string(placemark_coordinates[i].string, True))
+                # For each set of simpledata attributes in each placemark, add new simpledata field with corrospoding value
+                linestring.extendeddata.schemadata.newsimpledata('system_name', system_name[i])
+                linestring.extendeddata.schemadata.newsimpledata('ship_operation', ship_operation[i])
+                linestring.extendeddata.schemadata.newsimpledata('operation_date', operation_date[i])
+                linestring.extendeddata.schemadata.newsimpledata('cable_type', cable_type[i])
+                linestring.extendeddata.schemadata.newsimpledata('slack_percent', slack_percent[i])
+                linestring.extendeddata.schemadata.newsimpledata('segment_name', segment_name[i])
+                linestring.extendeddata.schemadata.newsimpledata('system_type', system_type[i])
+                linestring.extendeddata.schemadata.newsimpledata('installation_year', installation_year[i])
+                linestring.extendeddata.schemadata.newsimpledata('out_of_service_year', out_of_service_year[i])
+            except IndexError:
+                break
+            # Increment i to cycle through placemark_coordinates and all the arrays
+            i += 1
+
+    # Remove chars from folder name to avoid error when creating a path and saving file
     folder_name.string = folder_name.string.replace('/', '')
     folder_name.string = folder_name.string.replace('\\', '')
+    folder_name.string = folder_name.string.replace('&', '')
+    folder_name.string = folder_name.string.replace('<', '')
+    folder_name.string = folder_name.string.replace('>', '')
+    folder_name.string = folder_name.string.replace('"', '')
+    folder_name.string = folder_name.string.replace("'", '')
 
     # Set KML name and save directory
     kmlname = os.path.join(UPLOAD_DIRECTORY, (folder_name.string + ".kml"))
