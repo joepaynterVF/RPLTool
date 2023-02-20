@@ -17,7 +17,6 @@ from pathlib import Path
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
-from jupyter_dash import JupyterDash
 
 # Global Variables
 check = False
@@ -58,7 +57,7 @@ if os.path.exists('unsorted.csv'):
 # Initialise Server
 server = flask.Flask(__name__)
 # Build Components
-app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True,
+app = Dash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True,
            external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Get current operating directory
@@ -697,6 +696,10 @@ def update_output(value, KML_clicks, sort_clicks, lat, lon, existing_options, dr
         convertKMLToCSV(value)
         # Set column names for dataframe
         colnames = ['latitude', 'longitude', 'cable_type', 'slack']
+        # Check if file exists
+        if not os.path.exists('coordinates.csv'):
+            return cabletoggle, toggle, {
+                'display': 'none'}, kmlfiles, 'An error occurred', clipboardStyle, longSuggestion, clipboardStyle, latSuggestion, initialFig, False, False, ""
         # Save coordinates into a dataframe using the csv convertKMLToCSV function created
         df = pd.read_csv('coordinates.csv', names=colnames, header=None)
         # Initialise map with the dataframe of coordinates
@@ -1196,7 +1199,11 @@ def CheckCSV():
     cable type coordinates.
     Return: Creates coordinates.csv
     """
-    
+
+    # Check if csv is present
+    if not os.path.exists("cable_coordinates_all.csv"):
+        return "An error occurred"
+
     # ---------- Attempt number 1 to remove duplicates ---------- #
     # Load csv into dataframe
     first_df = pd.read_csv('cable_coordinates_all.csv')
