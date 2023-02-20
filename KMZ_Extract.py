@@ -4,12 +4,12 @@ import zipfile
 from os.path import basename
 from urllib.parse import quote as urlquote
 from bs4 import BeautifulSoup
-from flask import Flask, send_from_directory
+from flask import send_from_directory
 from dash import dcc, html, Input, Output
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
-from RPLTool import app, server, quit1
+from RPLTool import app, server
 import dash_bootstrap_components as dbc
 
 # Get current operating directory
@@ -28,6 +28,10 @@ def download(path):
 
 
 def create_page_KMZ_extract():
+    """
+    This function returns the layout for the KMZ_Extract page used by Dash.
+    :return: Dash Layout
+    """
     layout = html.Div(
         [
             html.Div(
@@ -53,6 +57,7 @@ def create_page_KMZ_extract():
 
                 }),
 
+            # Upload Box
             dcc.Upload(
                 id="upload-data",
                 children=html.Div(
@@ -214,8 +219,7 @@ def extract_KML(folder):
     kml = simplekml.Kml()
     # Find name of folder
     folder_name = folder.find('name')
-    # Find all coordinates in that folder
-    coordinates = folder.find_all('coordinates')
+    # Initialise Variables
     placemark_coordinates = []
     system_name = []
     ship_operation = []
@@ -246,38 +250,20 @@ def extract_KML(folder):
                 if "system_name" in allsimpledataobjs:
                     systemname = allsimpledataobjs["system_name"]
                     # Clean value so XML does not throw an error.
-                    systemname = systemname.replace('/', '')
-                    systemname = systemname.replace('\\', '')
-                    systemname = systemname.replace('&', '')
-                    systemname = systemname.replace('<', '')
-                    systemname = systemname.replace('>', '')
-                    systemname = systemname.replace('"', '')
-                    systemname = systemname.replace("'", '')
+                    systemname = clean(systemname)
                     system_name.append(systemname)
                 else:
                     # If attribute not in simpledata array within KML, append empty field
                     system_name.append("")
                 if "ship_operation" in allsimpledataobjs:
                     shipoperation = allsimpledataobjs["ship_operation"]
-                    shipoperation = shipoperation.replace('/', '')
-                    shipoperation = shipoperation.replace('\\', '')
-                    shipoperation = shipoperation.replace('&', '')
-                    shipoperation = shipoperation.replace('<', '')
-                    shipoperation = shipoperation.replace('>', '')
-                    shipoperation = shipoperation.replace('"', '')
-                    shipoperation = shipoperation.replace("'", '')
+                    shipoperation = clean(shipoperation)
                     ship_operation.append(shipoperation)
                 else:
                     ship_operation.append("")
                 if "operation_date" in allsimpledataobjs:
                     operationdate = allsimpledataobjs["operation_date"]
-                    operationdate = operationdate.replace('/', '')
-                    operationdate = operationdate.replace('\\', '')
-                    operationdate = operationdate.replace('&', '')
-                    operationdate = operationdate.replace('<', '')
-                    operationdate = operationdate.replace('>', '')
-                    operationdate = operationdate.replace('"', '')
-                    operationdate = operationdate.replace("'", '')
+                    operationdate = clean(operationdate)
                     operation_date.append(operationdate)
                 else:
                     operation_date.append("")
@@ -287,61 +273,31 @@ def extract_KML(folder):
                     cable_type.append("")
                 if "slack_percent" in allsimpledataobjs:
                     slackpercent = allsimpledataobjs["slack_percent"]
-                    slackpercent = slackpercent.replace('/', '')
-                    slackpercent = slackpercent.replace('\\', '')
-                    slackpercent = slackpercent.replace('&', '')
-                    slackpercent = slackpercent.replace('<', '')
-                    slackpercent = slackpercent.replace('>', '')
-                    slackpercent = slackpercent.replace('"', '')
-                    slackpercent = slackpercent.replace("'", '')
+                    slackpercent = clean(slackpercent)
                     slack_percent.append(slackpercent)
                 else:
                     slack_percent.append("")
                 if "segment_name" in allsimpledataobjs:
                     segmentname = allsimpledataobjs["segment_name"]
-                    segmentname = segmentname.replace('/', '')
-                    segmentname = segmentname.replace('\\', '')
-                    segmentname = segmentname.replace('&', '')
-                    segmentname = segmentname.replace('<', '')
-                    segmentname = segmentname.replace('>', '')
-                    segmentname = segmentname.replace('"', '')
-                    segmentname = segmentname.replace("'", '')
+                    segmentname = clean(segmentname)
                     segment_name.append(segmentname)
                 else:
                     segment_name.append("")
                 if "system_type" in allsimpledataobjs:
                     systemtype = allsimpledataobjs["system_type"]
-                    systemtype = systemtype.replace('/', '')
-                    systemtype = systemtype.replace('\\', '')
-                    systemtype = systemtype.replace('&', '')
-                    systemtype = systemtype.replace('<', '')
-                    systemtype = systemtype.replace('>', '')
-                    systemtype = systemtype.replace('"', '')
-                    systemtype = systemtype.replace("'", '')
+                    systemtype = clean(systemtype)
                     system_type.append(systemtype)
                 else:
                     system_type.append("")
                 if "installation_year" in allsimpledataobjs:
                     installationyear = allsimpledataobjs["installation_year"]
-                    installationyear = installationyear.replace('/', '')
-                    installationyear = installationyear.replace('\\', '')
-                    installationyear = installationyear.replace('&', '')
-                    installationyear = installationyear.replace('<', '')
-                    installationyear = installationyear.replace('>', '')
-                    installationyear = installationyear.replace('"', '')
-                    installationyear = installationyear.replace("'", '')
+                    installationyear = clean(installationyear)
                     installation_year.append(installationyear)
                 else:
                     installation_year.append("")
                 if "out_of_service_year" in allsimpledataobjs:
                     outofserviceyear = allsimpledataobjs["out_of_service_year"]
-                    outofserviceyear = outofserviceyear.replace('/', '')
-                    outofserviceyear = outofserviceyear.replace('\\', '')
-                    outofserviceyear = outofserviceyear.replace('&', '')
-                    outofserviceyear = outofserviceyear.replace('<', '')
-                    outofserviceyear = outofserviceyear.replace('>', '')
-                    outofserviceyear = outofserviceyear.replace('"', '')
-                    outofserviceyear = outofserviceyear.replace("'", '')
+                    outofserviceyear = clean(outofserviceyear)
                     out_of_service_year.append(outofserviceyear)
                 else:
                     out_of_service_year.append("")
@@ -385,6 +341,20 @@ def extract_KML(folder):
     # Save KML
     kml.save(kmlname)
 
+def clean(var):
+    """
+    This function cleans the variable of /, \\, &, <, >, ", '
+    :param var: Variable being passed in
+    :return: var, clean variable being returned.
+    """
+    var = var.replace('/', '')
+    var = var.replace('\\', '')
+    var = var.replace('&', '')
+    var = var.replace('<', '')
+    var = var.replace('>', '')
+    var = var.replace('"', '')
+    var = var.replace("'", '')
+    return var
 
 @app.callback(
     Output('loading-output-KMZ', 'children'),

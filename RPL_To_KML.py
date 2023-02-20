@@ -1,40 +1,11 @@
-from dash import html
 import base64
-import os
-from os.path import basename
-from urllib.parse import quote as urlquote
-from bs4 import BeautifulSoup
-from flask import Flask, send_from_directory
-from dash import dcc, html, Input, Output
-import simplekml
-from concurrent.futures import ThreadPoolExecutor
-from zipfile import ZipFile
-from RPLTool import app, server, quit1
-import dash_bootstrap_components as dbc
-# Run this app with `python app.py` and
-# visit http://127.0.0.1:8050/ in your web browser.
-from pathlib import Path
-import dash_uploader as du
-import flask
-from bs4 import BeautifulSoup
-import math
-import csv
-from dash import Dash, html, dcc, Input, Output, State, callback_context
-import plotly.express as px
+from flask import send_from_directory
+from RPLTool import app, server
+from dash import html, dcc, Input, Output, callback_context
 import pandas as pd
-import numpy as np
 import os
-import openpyxl
 import glob
-import webbrowser
-import signal
-
-import dash_daq as daq
-import xlwings as xw
 import simplekml
-from concurrent.futures import ThreadPoolExecutor
-from zipfile import ZipFile
-import time
 
 # Get current operating directory
 dir_path = os.getcwd()
@@ -210,6 +181,7 @@ def update_output(uploaded_filenames, uploaded_file_contents, n_clicks):
             RPL_name = rpl_list[0].replace(".xlsx", "")
         else:
             RPL_name = rpl_list[0].replace(".xls", "")
+
         # Initialise variables
         coords = []
         cable_type = []
