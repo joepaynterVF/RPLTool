@@ -17,6 +17,7 @@ from pathlib import Path
 import simplekml
 from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile
+from jupyter_dash import JupyterDash
 
 # Global Variables
 check = False
@@ -57,7 +58,7 @@ if os.path.exists('unsorted.csv'):
 # Initialise Server
 server = flask.Flask(__name__)
 # Build Components
-app = Dash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True,
+app = JupyterDash(__name__, title="Coordinate Sorter", server=server, suppress_callback_exceptions=True,
            external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Get current operating directory
