@@ -363,34 +363,34 @@ def clean(var):
 )
 def update_output(uploaded_filenames, uploaded_file_contents, value):
     """Save uploaded files and regenerate the file list."""
-
     global file_list
-
-    if uploaded_filenames is not None and uploaded_file_contents is not None:
-        for name, data in zip(uploaded_filenames, uploaded_file_contents):
-            # Check file type is .kmz
-            if ".kmz" in name:
-                # Save file
-                save_file(name, data)
-                # Check for bad filetype again, Catches exmaplefile.kmz.kml
-                try:
-                    # Unzip kmz to reveal doc.kml
-                    kmz = ZipFile(os.path.join(UPLOAD_DIRECTORY, name), 'r')
-                except zipfile.BadZipfile:
-                    # Remove incorrect file previously saved
-                    os.remove(os.path.join(UPLOAD_DIRECTORY, name))
+    if value is None:
+        if uploaded_filenames is not None and uploaded_file_contents is not None:
+            for name, data in zip(uploaded_filenames, uploaded_file_contents):
+                # Check file type is .kmz
+                if ".kmz" in name:
+                    # Save file
+                    save_file(name, data)
+                    # Check for bad filetype again, Catches exmaplefile.kmz.kml
+                    try:
+                        # Unzip kmz to reveal doc.kml
+                        kmz = ZipFile(os.path.join(UPLOAD_DIRECTORY, name), 'r')
+                    except zipfile.BadZipfile:
+                        # Remove incorrect file previously saved
+                        os.remove(os.path.join(UPLOAD_DIRECTORY, name))
+                        return ["Incorrect file type. Only .kmz supported", html.Li("No files yet!")]
+                    # Open doc.kml
+                    kml_filename = kmz.open('doc.kml', 'r')
+                    # Parse kml file
+                    s = BeautifulSoup(kml_filename, 'xml')
+                    # Find all folders
+                    folder_list = s.find_all('Folder')
+                    # Execute extract_KML() function for each folder in a different thread, parallel tasking, improving performance.
+                    with ThreadPoolExecutor() as executor:
+                        [executor.submit(extract_KML(folder=folder)) for folder in folder_list]
+                else:
                     return ["Incorrect file type. Only .kmz supported", html.Li("No files yet!")]
-                # Open doc.kml
-                kml_filename = kmz.open('doc.kml', 'r')
-                # Parse kml file
-                s = BeautifulSoup(kml_filename, 'xml')
-                # Find all folders
-                folder_list = s.find_all('Folder')
-                # Execute extract_KML() function for each folder in a different thread, parallel tasking, improving performance.
-                with ThreadPoolExecutor() as executor:
-                    [executor.submit(extract_KML(folder=folder)) for folder in folder_list]
-            else:
-                return ["Incorrect file type. Only .kmz supported", html.Li("No files yet!")]
+
     files = uploaded_files()
     file_list = []
     if len(files) == 0:
