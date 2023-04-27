@@ -517,10 +517,11 @@ def extract_KML(folder):
                     out_of_service_year.append(outofserviceyear)
                 else:
                     out_of_service_year.append("")
-                # Save coordinates within this placemark
-                placemark_coordinates.append(placemarkobj.find("coordinates"))
+         
                 # Clear allsimpledataobjs, ready for next placemark within folder
                 allsimpledataobjs.clear()
+            # Save coordinates within this placemark
+            placemark_coordinates.append(placemarkobj.find("coordinates"))
 
         i = 0
         while i <= len(placemark_coordinates):
